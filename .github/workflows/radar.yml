@@ -1,28 +1,44 @@
 name: sel-radar
+# Kendi kendini çalıştıran döngü: 15 dakikada bir tarar, ~5,5 saat sonra kendini yeniden başlatır.
+# GitHub'ın schedule'ı sadece yedek (döngü bir şekilde düşerse yeniden başlatır).
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '7 */3 * * *'
   workflow_dispatch:
 permissions:
   contents: write
-concurrency: radar
+  actions: write
+concurrency:
+  group: radar
+  cancel-in-progress: false
 jobs:
   tara:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install -q yt-dlp
-      - run: python sel_radar.py
+      - name: 15 dakikada bir tara (22 tur)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-      - name: durumu kaydet
         run: |
           git config user.name radar-bot
           git config user.email radar-bot@users.noreply.github.com
-          git add gorulen_sel.json
-          git diff --cached --quiet || (git commit -q -m "durum" && git push -q)
+          for i in $(seq 1 22); do
+            bas=$(date +%s)
+            python sel_radar.py || echo "tur $i hata"
+            git add gorulen_sel.json
+            if ! git diff --cached --quiet; then
+              git commit -q -m "durum" && (git pull -q --rebase && git push -q || echo "push hata")
+            fi
+            [ $i -lt 22 ] && sleep $(( 900 - ( $(date +%s) - bas ) > 0 ? 900 - ( $(date +%s) - bas ) : 0 ))
+          done
+      - name: kendini yeniden başlat
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run radar.yml -R ${{ github.repository }}
