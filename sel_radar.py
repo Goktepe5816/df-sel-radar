@@ -104,7 +104,21 @@ def trends():
 
 RAKIP = {'GWN': 'UCSn-jzJf_LMbT8bAfHj92_Q', 'WeatherWatchUSA': 'UCm9RoJU7rc-bk-3SZzUksdQ'}
 def rakip_videolar(cid):
-    """Önce RSS; YouTube RSS 404/500 verirse yt-dlp ile son 6 video."""
+    """Önce YouTube Data API (bulutta tek güvenilir yol), sonra RSS, en son yt-dlp. Son 6 video."""
+    key = os.environ.get('YT_API_KEY')
+    kf = os.path.join(os.path.dirname(D), '_assets', 'youtube_api_key.txt')
+    if not key and os.path.exists(kf):
+        key = open(kf).read().strip()
+    if key:
+        try:
+            pl = json.loads(get('https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=6&playlistId=UU'
+                                + cid[2:] + '&key=' + key))
+            ids = ','.join(i['contentDetails']['videoId'] for i in pl['items'])
+            vs = json.loads(get('https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=' + ids + '&key=' + key))
+            return [(v['snippet']['title'], datetime.fromisoformat(v['snippet']['publishedAt'].replace('Z', '+00:00')),
+                     int(v['statistics'].get('viewCount', 0)), 'https://www.youtube.com/watch?v=' + v['id']) for v in vs['items']]
+        except Exception:
+            pass
     ns = {'a': 'http://www.w3.org/2005/Atom'}
     try:
         x = ET.fromstring(get(f'https://www.youtube.com/feeds/videos.xml?channel_id={cid}'))

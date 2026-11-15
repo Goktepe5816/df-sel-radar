@@ -25,6 +25,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
         run: |
           git config user.name radar-bot
           git config user.email radar-bot@users.noreply.github.com
@@ -35,7 +36,7 @@ jobs:
             if ! git diff --cached --quiet; then
               git commit -q -m "durum" && (git pull -q --rebase && git push -q || echo "push hata")
             fi
-            [ $i -lt 22 ] && sleep $(( 900 - ( $(date +%s) - bas ) > 0 ? 900 - ( $(date +%s) - bas ) : 0 ))
+            if [ $i -lt 22 ]; then k=$(( 900 - ( $(date +%s) - bas ) )); [ $k -gt 0 ] && sleep $k; fi; true
           done
       - name: kendini yeniden başlat
         if: always()
