@@ -102,6 +102,30 @@ def trends():
             trafik = it.findtext('ht:approx_traffic', '', ns)
             yield 6, f"tr:{q.lower()}:{DAY}", f"📈 Google Trends ABD: '{q}' aranıyor ({trafik})", '', 'https://trends.google.com/trending?geo=US'
 
+
+# NATURE ALERT (Avrupa): Meteoalarm TURUNCU (Severe) / KIRMIZI (Extreme) sel-yağmur-fırtına uyarıları
+AB = {'france':'🇫🇷 Fransa','spain':'🇪🇸 İspanya','italy':'🇮🇹 İtalya','germany':'🇩🇪 Almanya','united-kingdom':'🇬🇧 İngiltere',
+      'greece':'🇬🇷 Yunanistan','portugal':'🇵🇹 Portekiz','austria':'🇦🇹 Avusturya','poland':'🇵🇱 Polonya','czechia':'🇨🇿 Çekya',
+      'romania':'🇷🇴 Romanya','croatia':'🇭🇷 Hırvatistan','slovenia':'🇸🇮 Slovenya','switzerland':'🇨🇭 İsviçre','belgium':'🇧🇪 Belçika',
+      'netherlands':'🇳🇱 Hollanda','ireland':'🇮🇪 İrlanda','norway':'🇳🇴 Norveç','sweden':'🇸🇪 İsveç','bulgaria':'🇧🇬 Bulgaristan'}
+AB_OLAY = re.compile(r'flood|rain|thunder|storm|wind|coastal', re.I)
+def avrupa():
+    cap = '{urn:oasis:names:tc:emergency:cap:1.2}'; ns = '{http://www.w3.org/2005/Atom}'
+    for slug, ad in AB.items():
+        try:
+            x = ET.fromstring(get(f'https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-{slug}'))
+        except Exception:
+            continue
+        grup = {}
+        for e in x.iter(ns + 'entry'):
+            sev = e.findtext(cap + 'severity') or ''; ev = e.findtext(cap + 'event') or ''
+            if sev in ('Severe', 'Extreme') and AB_OLAY.search(ev):
+                tur = re.sub(r'^(Severe|Extreme|Moderate)\s+|\s+warning$', '', ev, flags=re.I)
+                grup.setdefault((sev, tur), set()).add(e.findtext(cap + 'areaDesc') or '')
+        for (sev, tur), yer in grup.items():
+            renk = '🔴 KIRMIZI' if sev == 'Extreme' else '🟠 TURUNCU'
+            yield (15 if sev == 'Extreme' else 9), f"ab:{slug}:{sev}:{tur}:{DAY}", f"[NA] {ad}: {renk} {tur} uyarısı — {len(yer)} bölge", '; '.join(sorted(yer)[:6]), 'https://meteoalarm.org'
+
 RAKIP = {'GWN': 'UCSn-jzJf_LMbT8bAfHj92_Q', 'WeatherWatchUSA': 'UCm9RoJU7rc-bk-3SZzUksdQ'}
 def rakip_videolar(cid):
     """Önce YouTube Data API (bulutta tek güvenilir yol), sonra RSS, en son yt-dlp. Son 6 video."""
@@ -148,6 +172,9 @@ def rakip():
             yas = NOW - pub
             saat = max(yas.total_seconds() / 3600, 0.25)
             # Kullanıcı 11.11: rakipte ~2 saatte 50K-100K olan konu HEMEN bizde yapılır (niş fark etmez)
+            # Kullanıcı 16.11: rakip yeni konuya atlayınca HEMEN haber ver (izlenme beklemeden)
+            if yas <= timedelta(hours=3):
+                yield 12, f"rakipyeni:{url}", f"🆕 {ad} YENİ VİDEO ({saat:.1f} sa önce, {izl:,} izl) — konuya bak", t, url
             if yas <= timedelta(hours=4) and (izl >= 50000 or izl / saat >= 25000):
                 yield 20, f"patla:{url}", f"🔥 PATLIYOR — {ad} {izl:,} izlenme / {saat:.1f} saat → HEMEN YAPALIM", t, url
 
@@ -167,7 +194,7 @@ def main():
         gor = {}
     ilk = not gor
     yeni, hatalar = [], []
-    for kaynak in (nws, nwps, trends, rakip):
+    for kaynak in (nws, nwps, trends, avrupa, rakip):
         try:
             for puan, key, baslik, detay, url in kaynak():
                 if key not in gor:
@@ -180,7 +207,7 @@ def main():
     yeni.sort(key=lambda x: -x[0])
     zaman = datetime.now(TR).strftime('%d.%m %H:%M')
     if yeni:
-        parca = [f'🌧️ <b>SEL RADARI</b> {zaman}' + (' (ilk tarama, şu an açık olanlar)' if ilk else '')]
+        parca = [f'🌧️ <b>AFET RADARI (DF+NA)</b> {zaman}' + (' (ilk tarama, şu an açık olanlar)' if ilk else '')]
         for puan, b, dt, u in yeni[:12]:
             parca.append(f'\n<b><a href="{html.escape(u)}">{html.escape(b)}</a></b>' + (f'\n{html.escape(dt)}' if dt else ''))
         mesaj = '\n'.join(parca)
@@ -192,7 +219,7 @@ def main():
     # Günlük 'hayattayım' mesajı (TR 10:00 sonrası ilk tarama): sessizlik = bozuk mu sorusu olmasın
     if datetime.now(TR).hour >= 10 and gor.get('_nabiz') != DAY:
         gor['_nabiz'] = DAY
-        nabiz = f'✅ Sel radarı çalışıyor ({zaman}). Son 24 saatte {len([1 for k,v in gor.items() if not k.startswith("_") and v == DAY])} uyarı. Büyük olay olunca yazarım.'
+        nabiz = f'✅ Radar (ABD+Avrupa+rakip) çalışıyor ({zaman}). Son 24 saatte {len([1 for k,v in gor.items() if not k.startswith("_") and v == DAY])} uyarı. Büyük olay olunca yazarım.'
         print(nabiz)
         if not DRY:
             gonder(nabiz)
