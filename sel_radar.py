@@ -124,7 +124,30 @@ def avrupa():
                 grup.setdefault((sev, tur), set()).add(e.findtext(cap + 'areaDesc') or '')
         for (sev, tur), yer in grup.items():
             renk = '🔴 KIRMIZI' if sev == 'Extreme' else '🟠 TURUNCU'
-            yield (15 if sev == 'Extreme' else 9), f"ab:{slug}:{sev}:{tur}:{DAY}", f"[NA] {ad}: {renk} {tur} uyarısı — {len(yer)} bölge", '; '.join(sorted(yer)[:6]), 'https://meteoalarm.org'
+            yield (15 if sev == 'Extreme' else 9), f"ab:{slug}:{sev}:{tur}:{DAY}", f"🌍 {ad}: {renk} {tur} uyarısı — {len(yer)} bölge", '; '.join(sorted(yer)[:6]), 'https://meteoalarm.org'
+
+# TÜM DÜNYA (kullanıcı 17.11: ayırma, her yere bak): GDACS turuncu/kırmızı + her yanardağ, USGS M6+ deprem
+def dunya():
+    x = ET.fromstring(get('https://www.gdacs.org/xml/rss.xml'))
+    g = '{http://www.gdacs.org}'
+    simge = {'EQ':'🌋 Deprem','TC':'🌀 Kasırga/Tayfun','FL':'🌊 Sel','VO':'🌋 Yanardağ','WF':'🔥 Orman yangını','DR':'☀️ Kuraklık'}
+    for it in x.iter('item'):
+        tip = it.findtext(g + 'eventtype') or ''; sev = it.findtext(g + 'alertlevel') or ''
+        ulke = it.findtext(g + 'country') or ''; t = it.findtext('title') or ''
+        pub = it.findtext('pubDate') or ''
+        try:
+            if NOW - datetime.strptime(pub, '%a, %d %b %Y %H:%M:%S %Z').replace(tzinfo=timezone.utc) > timedelta(hours=48):
+                continue
+        except Exception:
+            pass
+        if sev in ('Orange', 'Red') or tip == 'VO':
+            renk = '🔴 KIRMIZI' if sev == 'Red' else ('🟠 TURUNCU' if sev == 'Orange' else '🟢')
+            yield (16 if sev == 'Red' else 10), f"gdacs:{it.findtext(g + 'eventid') or t}:{sev}", f"🌍 {ulke}: {simge.get(tip, tip)} — GDACS {renk}", t, it.findtext('link') or 'https://www.gdacs.org'
+    d = json.loads(get('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson'))
+    for f in d['features']:
+        pr = f['properties']
+        if (pr.get('mag') or 0) >= 6.0:
+            yield (14 if pr['mag'] >= 7 else 9), f"usgs:{f['id']}", f"🌍 DEPREM M{pr['mag']:.1f} — {pr.get('place','')}", (pr.get('alert') or '') and f"PAGER: {pr['alert']}", pr.get('url') or 'https://earthquake.usgs.gov'
 
 RAKIP = {'GWN': 'UCSn-jzJf_LMbT8bAfHj92_Q', 'WeatherWatchUSA': 'UCm9RoJU7rc-bk-3SZzUksdQ'}
 def rakip_videolar(cid):
@@ -194,7 +217,7 @@ def main():
         gor = {}
     ilk = not gor
     yeni, hatalar = [], []
-    for kaynak in (nws, nwps, trends, avrupa, rakip):
+    for kaynak in (nws, nwps, trends, avrupa, dunya, rakip):
         try:
             for puan, key, baslik, detay, url in kaynak():
                 if key not in gor:
@@ -207,7 +230,7 @@ def main():
     yeni.sort(key=lambda x: -x[0])
     zaman = datetime.now(TR).strftime('%d.%m %H:%M')
     if yeni:
-        parca = [f'🌧️ <b>AFET RADARI (DF+NA)</b> {zaman}' + (' (ilk tarama, şu an açık olanlar)' if ilk else '')]
+        parca = [f'🌧️ <b>DÜNYA AFET RADARI</b> {zaman}' + (' (ilk tarama, şu an açık olanlar)' if ilk else '')]
         for puan, b, dt, u in yeni[:12]:
             parca.append(f'\n<b><a href="{html.escape(u)}">{html.escape(b)}</a></b>' + (f'\n{html.escape(dt)}' if dt else ''))
         mesaj = '\n'.join(parca)
@@ -219,7 +242,7 @@ def main():
     # Günlük 'hayattayım' mesajı (TR 10:00 sonrası ilk tarama): sessizlik = bozuk mu sorusu olmasın
     if datetime.now(TR).hour >= 10 and gor.get('_nabiz') != DAY:
         gor['_nabiz'] = DAY
-        nabiz = f'✅ Radar (ABD+Avrupa+rakip) çalışıyor ({zaman}). Son 24 saatte {len([1 for k,v in gor.items() if not k.startswith("_") and v == DAY])} uyarı. Büyük olay olunca yazarım.'
+        nabiz = f'✅ Dünya radarı (ABD+Avrupa+GDACS+deprem+rakip) çalışıyor ({zaman}). Son 24 saatte {len([1 for k,v in gor.items() if not k.startswith("_") and v == DAY])} uyarı. Büyük olay olunca yazarım.'
         print(nabiz)
         if not DRY:
             gonder(nabiz)
