@@ -283,7 +283,8 @@ def rakip():
             # Kullanıcı 16.11: rakip yeni konuya atlayınca HEMEN haber ver (izlenme beklemeden)
             if yas <= timedelta(hours=3):
                 yield 12, f"rakipyeni:{url}", f"🆕 {ad} YENİ VİDEO ({saat:.1f} sa önce, {izl:,} izl) — konuya bak", t, url
-            if yas <= timedelta(hours=4) and (izl >= 50000 or izl / saat >= 25000):
+            # 18.11 hacim modu: eşik düşürüldü (GWN 17-18.11: 43K-617K patlayanlar ilk saatlerde 5K/sa üstü)
+            if yas <= timedelta(hours=4) and (izl >= 15000 or izl / saat >= 5000):
                 yield 20, f"patla:{url}", f"🔥 PATLIYOR — {ad} {izl:,} izlenme / {saat:.1f} saat → HEMEN YAPALIM", t, url
 
 def gonder(mesaj):
