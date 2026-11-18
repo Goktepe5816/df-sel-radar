@@ -103,13 +103,16 @@ def trends():
             yield 6, f"tr:{q.lower()}:{DAY}", f"📈 Google Trends ABD: '{q}' aranıyor ({trafik})", '', 'https://trends.google.com/trending?geo=US'
 
 
-# NATURE ALERT (Avrupa): Meteoalarm TURUNCU (Severe) / KIRMIZI (Extreme) sel-yağmur-fırtına uyarıları
+# NATURE ALERT (Avrupa) — 2026-11-18 yeniden: uyarı değil GERÇEK OLAY yakala.
+# 1) Google News yerel dil haber yoğunluğu (heyelan/sel/tahliye/mahsur) 2) EMSC deprem M4.8+ 3) Meteoalarm KIRMIZI
+# 4) GWN'nin Avrupa videoları 5) YouTube'da Avrupa afet videosu talebi (6 saatte bir). Hepsi ayrı 'NATURE ALERT' mesajında.
 AB = {'france':'🇫🇷 Fransa','spain':'🇪🇸 İspanya','italy':'🇮🇹 İtalya','germany':'🇩🇪 Almanya','united-kingdom':'🇬🇧 İngiltere',
       'greece':'🇬🇷 Yunanistan','portugal':'🇵🇹 Portekiz','austria':'🇦🇹 Avusturya','poland':'🇵🇱 Polonya','czechia':'🇨🇿 Çekya',
       'romania':'🇷🇴 Romanya','croatia':'🇭🇷 Hırvatistan','slovenia':'🇸🇮 Slovenya','switzerland':'🇨🇭 İsviçre','belgium':'🇧🇪 Belçika',
       'netherlands':'🇳🇱 Hollanda','ireland':'🇮🇪 İrlanda','norway':'🇳🇴 Norveç','sweden':'🇸🇪 İsveç','bulgaria':'🇧🇬 Bulgaristan'}
 AB_OLAY = re.compile(r'flood|rain|thunder|storm|wind|coastal', re.I)
 def avrupa():
+    """Meteoalarm: sadece KIRMIZI ya da 10+ bölgede TURUNCU (turuncu tek başına olay değil, gürültü)."""
     cap = '{urn:oasis:names:tc:emergency:cap:1.2}'; ns = '{http://www.w3.org/2005/Atom}'
     for slug, ad in AB.items():
         try:
@@ -120,11 +123,93 @@ def avrupa():
         for e in x.iter(ns + 'entry'):
             sev = e.findtext(cap + 'severity') or ''; ev = e.findtext(cap + 'event') or ''
             if sev in ('Severe', 'Extreme') and AB_OLAY.search(ev):
-                tur = re.sub(r'^(Severe|Extreme|Moderate)\s+|\s+warning$', '', ev, flags=re.I)
+                tur = re.sub(r'^(Severe|Extreme|Moderate|Orange|Red)\s+|\s+warning$', '', ev, flags=re.I)
                 grup.setdefault((sev, tur), set()).add(e.findtext(cap + 'areaDesc') or '')
         for (sev, tur), yer in grup.items():
+            if sev == 'Severe' and len(yer) < 10:
+                continue
             renk = '🔴 KIRMIZI' if sev == 'Extreme' else '🟠 TURUNCU'
-            yield (15 if sev == 'Extreme' else 9), f"ab:{slug}:{sev}:{tur}:{DAY}", f"🌍 {ad}: {renk} {tur} uyarısı — {len(yer)} bölge", '; '.join(sorted(yer)[:6]), 'https://meteoalarm.org'
+            yield (15 if sev == 'Extreme' else 8), f"na:ma:{slug}:{sev}:{tur}:{DAY}", f"{ad}: Meteoalarm {renk} {tur} — {len(yer)} bölge", '; '.join(sorted(yer)[:6]), 'https://meteoalarm.org'
+
+NA_HABER = [  # (ülke, dil, gl, sorgu) — yerel dilde HASAR/ETKİ kelimeleri (tahmin değil)
+    ('🇮🇹 İtalya','it','IT','frana isolati'), ('🇮🇹 İtalya','it','IT','alluvione sfollati'), ('🇮🇹 İtalya','it','IT','esondazione fiume evacuazione'),
+    ('🇮🇹 İtalya','it','IT','eruzione Etna'), ('🇫🇷 Fransa','fr','FR','inondations évacués'), ('🇫🇷 Fransa','fr','FR','crue routes coupées'),
+    ('🇫🇷 Fransa','fr','FR','vigilance rouge crues'), ('🇪🇸 İspanya','es','ES','inundaciones desalojados'), ('🇪🇸 İspanya','es','ES','DANA riada rescate'),
+    ('🇵🇹 Portekiz','pt-PT','PT','inundações desalojados Portugal'), ('🇬🇷 Yunanistan','el','GR','πλημμύρες εκκένωση'), ('🇬🇷 Yunanistan','el','GR','κατολίσθηση αποκλεισμένοι'),
+    ('🇩🇪 Almanya','de','DE','Hochwasser evakuiert'), ('🇦🇹 Avusturya','de','AT','Hochwasser Mure'), ('🇨🇭 İsviçre','de','CH','Murgang evakuiert'),
+    ('🇬🇧 İngiltere','en','GB','flooding evacuated England OR Scotland OR Wales'), ('🇬🇧 İngiltere','en','GB','"major incident" flooding'),
+    ('🇵🇱 Polonya','pl','PL','powódź ewakuacja'), ('🇨🇿 Çekya','cs','CZ','povodně evakuace'), ('🇭🇷 Hırvatistan','hr','HR','poplave evakuacija'),
+    ('🇧🇦 Bosna','bs','BA','poplave evakuacija'), ('🇷🇴 Romanya','ro','RO','inundații evacuați'), ('🇸🇮 Slovenya','sl','SI','poplave evakuacija'),
+    ('🇮🇸 İzlanda','is','IS','eldgos'), ('🇳🇴 Norveç','no','NO','flom evakuert'),
+]
+NON_EU = re.compile(r'Bahia|Brasil|Brazil|Rio |São Paulo|Minas|Pernambuco|México|Mexico|Chalco|Argentin|Colombia|Chile|Peru|Venezuela|'
+                    r'Texas|Florida|California|Carolina|Kentucky|Colorado|St\\. Louis|Missouri|Washington|Oregon|USA|U\\.S\\.|America|Canada|'
+                    r'Australia|India|Pakistan|Vietnam|Indonesia|Philippin|China|Japan|Africa|Nigeria|Kenya|Iraq|Iran|Gaza|KUNC', re.I)
+def na_haber():
+    """Bir ülkede son 12 saatte etki haberi yoğunlaşınca (3/8/15 eşik) yaz. Örnek başlıklarla."""
+    sayac, ornek = {}, {}
+    for ulke, hl, gl, q in NA_HABER:
+        try:
+            x = ET.fromstring(get(f'https://news.google.com/rss/search?q={urllib.parse.quote(q + " when:12h")}&hl={hl}&gl={gl}&ceid={gl}:{hl}'))
+        except Exception:
+            continue
+        for it in x.iter('item'):
+            t = it.findtext('title') or ''
+            if NON_EU.search(t):
+                continue
+            k = re.sub(r'\W+', ' ', t.lower())[:50]
+            if k in ornek.setdefault(ulke, {}):
+                continue
+            ornek[ulke][k] = (t, it.findtext('link') or '')
+            sayac[ulke] = sayac.get(ulke, 0) + 1
+    for ulke, n in sayac.items():
+        esik = 15 if n >= 15 else 8 if n >= 8 else 3 if n >= 3 else 0
+        if not esik:
+            continue
+        ilk = list(ornek[ulke].values())
+        yield (8 + esik // 2), f"na:haber:{ulke}:{esik}:{DAY}", f"{ulke}: son 12 saatte {n} hasar/tahliye haberi", ' | '.join(t[:90] for t, _ in ilk[:3]), ilk[0][1]
+
+def na_deprem():
+    s = (NOW - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S')
+    d = json.loads(get(f'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&minmag=4.8&start={s}&minlat=34&maxlat=72&minlon=-25&maxlon=45'))
+    for f in d['features']:
+        p = f['properties']
+        yield (13 if p['mag'] >= 5.5 else 9), f"na:emsc:{f['id']}", f"🌍 DEPREM M{p['mag']:.1f} — {p.get('flynn_region','')}", f"{p.get('time','')[:16]} UTC, derinlik {p.get('depth','?')} km", f"https://www.emsc-csem.org/Earthquake_information/earthquake.php?id={f['id']}"
+
+AB_KELIME = re.compile(r'Ital|Tuscan|Sicil|Sardin|Venice|Rome|Milan|Genoa|Naples|France|French|Paris|Marseille|Nice|Corsica|Spain|Spanish|Valencia|'
+                       r'Barcelona|Madrid|Malaga|Andalus|Mallorca|Canary|Portugal|Lisbon|Madeira|Greece|Greek|Athens|Crete|Rhodes|UK|Britain|England|'
+                       r'Scotland|Wales|Ireland|London|Germany|Austria|Switzerland|Swiss|Alps|Poland|Czech|Slovenia|Croatia|Bosnia|Serbia|Romania|'
+                       r'Bulgaria|Norway|Sweden|Iceland|Etna|Vesuvius|Campi Flegrei|Europe|Belgium|Netherlands|Dutch|Albania|Montenegro', re.I)
+def na_rakip():
+    for t, pub, izl, url in rakip_videolar(RAKIP['GWN']):
+        if AB_KELIME.search(t) and NOW - pub <= timedelta(hours=6):
+            saat = max((NOW - pub).total_seconds() / 3600, 0.25)
+            yield (18 if izl / saat >= 10000 else 11), f"na:gwn:{url}", f"🆕 GWN Avrupa videosu ({saat:.1f} sa, {izl:,} izl) — konu bizde de olabilir", t, url
+
+NA_YT_Q = ['Italy flood', 'France flood', 'Spain flood', 'Greece flood', 'UK storm flooding', 'Europe landslide']
+def na_youtube():
+    """6 saatte bir (kota): son 12 saatte yüklenmiş Avrupa afet videosu 10K+ izlendiyse talep var."""
+    h = datetime.now(TR)
+    if h.hour % 6 != 0 or h.minute >= 15:
+        return
+    key = os.environ.get('YT_API_KEY')
+    kf = os.path.join(os.path.dirname(D), '_assets', 'youtube_api_key.txt')
+    if not key and os.path.exists(kf):
+        key = open(kf).read().strip()
+    if not key:
+        return
+    after = (NOW - timedelta(hours=12)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    for q in NA_YT_Q:
+        r = json.loads(get('https://www.googleapis.com/youtube/v3/search?' + urllib.parse.urlencode(dict(
+            part='id', q=q, type='video', order='viewCount', publishedAfter=after, maxResults=5, key=key))))
+        ids = ','.join(i['id']['videoId'] for i in r.get('items', []))
+        if not ids:
+            continue
+        vs = json.loads(get('https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=' + ids + '&key=' + key))
+        for v in vs['items']:
+            izl = int(v['statistics'].get('viewCount', 0)); t = v['snippet']['title']
+            if izl >= 10000 and AB_KELIME.search(t):
+                yield 12, f"na:yt:{v['id']}", f"📺 Avrupa talebi: {izl:,} izlenme (≤12 sa) — {v['snippet']['channelTitle']}", t, 'https://www.youtube.com/watch?v=' + v['id']
 
 # TÜM DÜNYA (kullanıcı 17.11: ayırma, her yere bak): GDACS turuncu/kırmızı + her yanardağ, USGS M6+ deprem
 def dunya():
@@ -217,11 +302,12 @@ def main():
         gor = {}
     ilk = not gor
     yeni, hatalar = [], []
-    for kaynak in (nws, nwps, trends, avrupa, dunya, rakip):
+    na = []
+    for kaynak in (nws, nwps, trends, dunya, rakip, avrupa, na_haber, na_deprem, na_rakip, na_youtube):
         try:
-            for puan, key, baslik, detay, url in kaynak():
+            for puan, key, baslik, detay, url in (kaynak() or []):
                 if key not in gor:
-                    gor[key] = DAY; yeni.append((puan, baslik, detay, url))
+                    gor[key] = DAY; (na if key.startswith('na:') else yeni).append((puan, baslik, detay, url))
         except Exception as e:
             hatalar.append(f'{kaynak.__name__}: {e}')
     # 3 günden eski kayıtları temizle
@@ -239,10 +325,19 @@ def main():
             gonder(mesaj[:4000])
     else:
         print(zaman, 'yeni yok')
+    if na:
+        na.sort(key=lambda x: -x[0])
+        parca = [f'🇪🇺 <b>NATURE ALERT — AVRUPA RADARI</b> {zaman}' + (' (ilk tarama)' if ilk else '')]
+        for puan, b, dt, u in na[:10]:
+            parca.append(f'\n<b><a href="{html.escape(u)}">{html.escape(b)}</a></b>' + (f'\n{html.escape(dt)}' if dt else ''))
+        mesaj = '\n'.join(parca)
+        print(mesaj)
+        if not DRY:
+            gonder(mesaj[:4000])
     # Günlük 'hayattayım' mesajı (TR 10:00 sonrası ilk tarama): sessizlik = bozuk mu sorusu olmasın
     if datetime.now(TR).hour >= 10 and gor.get('_nabiz') != DAY:
         gor['_nabiz'] = DAY
-        nabiz = f'✅ Dünya radarı (ABD+Avrupa+GDACS+deprem+rakip) çalışıyor ({zaman}). Son 24 saatte {len([1 for k,v in gor.items() if not k.startswith("_") and v == DAY])} uyarı. Büyük olay olunca yazarım.'
+        nabiz = f'✅ Dünya radarı (ABD + NATURE ALERT Avrupa haber/deprem/GWN/YouTube + GDACS) çalışıyor ({zaman}). Son 24 saatte {len([1 for k,v in gor.items() if not k.startswith("_") and v == DAY])} uyarı. Büyük olay olunca yazarım.'
         print(nabiz)
         if not DRY:
             gonder(nabiz)
