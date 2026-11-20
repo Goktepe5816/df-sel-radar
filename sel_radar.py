@@ -82,7 +82,7 @@ def nws():
             yield 6, f"yigin:{st}:{DAY}:{len(ilc) // 3}", f"🌧️ {st}: {len(ilc)} ilçede aynı anda sel uyarısı", '; '.join(sorted(ilc)[:6]), 'https://forecast.weather.gov/wwamap/wwatxtget.php?cwa=usa&wwa=Flash%20Flood%20Warning'
 
 def nwps():
-    d = json.loads(get('https://api.water.noaa.gov/nwps/v1/gauges?bbox.xmin=-170&bbox.ymin=17&bbox.xmax=-64&bbox.ymax=72&srid=EPSG_4326', timeout=120))
+    d = gauges()
     major = {}
     for g in d.get('gauges', d):
         st = g.get('status', {})
@@ -281,11 +281,102 @@ def rakip():
             saat = max(yas.total_seconds() / 3600, 0.25)
             # Kullanıcı 11.11: rakipte ~2 saatte 50K-100K olan konu HEMEN bizde yapılır (niş fark etmez)
             # Kullanıcı 16.11: rakip yeni konuya atlayınca HEMEN haber ver (izlenme beklemeden)
-            if yas <= timedelta(hours=3):
-                yield 12, f"rakipyeni:{url}", f"🆕 {ad} YENİ VİDEO ({saat:.1f} sa önce, {izl:,} izl) — konuya bak", t, url
+            # 20.11: her yeni video bildirimi gürültüydü (kullanıcı: 'bot bir şey vermiyor') -> sadece tutanlar
             # 18.11 hacim modu: eşik düşürüldü (GWN 17-18.11: 43K-617K patlayanlar ilk saatlerde 5K/sa üstü)
             if yas <= timedelta(hours=4) and (izl >= 15000 or izl / saat >= 5000):
                 yield 20, f"patla:{url}", f"🔥 PATLIYOR — {ad} {izl:,} izlenme / {saat:.1f} saat → HEMEN YAPALIM", t, url
+
+# ---- 2026-11-20 ÖLÇÜLMÜŞ BÜYÜK OLAY tetikleyicileri (kullanıcı: 'botun bir şey verdiği yok') ----
+# Video çıkaran şey uyarı değil ölçülmüş rakam: rekor yağış, eve su girdi/kurtarma, nehir rekoru, WPC 4/4.
+def _urunler(tip, saat):
+    d = json.loads(get(f'https://api.weather.gov/products/types/{tip}'))
+    for p in d.get('@graph', []):
+        t = datetime.fromisoformat(p['issuanceTime'].replace('Z', '+00:00'))
+        if NOW - t <= timedelta(hours=saat):
+            yield p
+SATIR = re.compile(r'^(\S.{2,40}?)\s{2,}(\d+(?:\.\d+)?)\s+(?:Inch|IN)\b', re.I)
+def yagis_rekor():
+    """NWS PNS yağış/kar toplamları: yağmur >=10 inç, kar >=36 inç."""
+    for p in list(_urunler('PNS', 6))[:40]:
+        try:
+            txt = json.loads(get('https://api.weather.gov/products/' + p['id']))['productText']
+        except Exception:
+            continue
+        ofis = p.get('issuingOffice', '')
+        kar = False; en = {}
+        for l in txt.splitlines():
+            u = l.upper()
+            if u.startswith('...') and ('SNOW' in u or 'PRECIP' in u or 'RAIN' in u):
+                kar = 'SNOW' in u
+            m = SATIR.match(l.strip())
+            if m:
+                v = float(m.group(2)); tur = 'kar' if kar else 'yağmur'
+                if v > en.get(tur, (0, ''))[0]:
+                    en[tur] = (v, m.group(1).strip())
+        for tur, (v, yer) in en.items():
+            if (tur == 'yağmur' and 10 <= v < 60) or (tur == 'kar' and 36 <= v < 200):
+                yield (17 if v >= (15 if tur == 'yağmur' else 48) else 13), f"pns:{ofis}:{tur}:{int(v)//5}:{DAY}", \
+                    f"📏 ÖLÇÜLDÜ: {v:g} inç {tur} — {yer} ({ofis})", f"{v*2.54:.0f} cm. NWS bülteni {p['issuanceTime'][:16]} UTC", \
+                    'https://api.weather.gov/products/' + p['id']
+HASAR = re.compile(r'enter(ing|ed)? (the )?(home|house|structure|building)|into (home|house)|homes? flood|water rescue|rescued|evacuat|'
+                   r'washed out|collaps|stranded|swept|trapped|roof (blown|torn)|destroy|approaching (the )?(home|house|structure)|threatening (home|house|structure)|water in (home|house)|impassable', re.I)
+def saha_hasar():
+    """NWS LSR: sahadan 'eve su girdi / kurtarma / yol çöktü' raporları, ofis başına toplanır."""
+    grup = {}
+    for p in list(_urunler('LSR', 4))[:60]:
+        try:
+            txt = json.loads(get('https://api.weather.gov/products/' + p['id']))['productText']
+        except Exception:
+            continue
+        for blok in re.split(r'\n&&|\n\n(?=\d{4} [AP]M)', txt):
+            tek = ' '.join(blok.split())
+            if HASAR.search(tek) and re.search(r'flood|tornado|wind|surf|surge|snow|mud|debris|landslide', tek, re.I):
+                yer = ''
+                for l in blok.splitlines():
+                    k = re.split(r'\s{2,}', l.strip())
+                    if len(k) >= 3 and re.match(r'\d{4} [AP]M$', k[0]):
+                        yer = k[2]
+                    elif len(k) >= 3 and re.match(r'\d{2}/\d{2}/\d{4}$', k[0]) and yer:
+                        yer += ', ' + k[-2] if len(k) >= 4 else ''
+                ozet = HASAR.search(tek).group(0)
+                grup.setdefault(p.get('issuingOffice', ''), []).append(f"{yer} ({ozet})")
+    for ofis, l in grup.items():
+        yield (15 if len(l) >= 3 else 11), f"lsr:{ofis}:{DAY}:{len(l)//3}", f"🏚️ SAHADAN HASAR — {ofis}: {len(l)} rapor", '; '.join(l[:4]), 'https://www.weather.gov/'
+_GAUGES = None
+def gauges():
+    global _GAUGES
+    if _GAUGES is None:
+        for k in range(3):
+            try:
+                _GAUGES = json.loads(get('https://api.water.noaa.gov/nwps/v1/gauges?bbox.xmin=-170&bbox.ymin=17&bbox.xmax=-64&bbox.ymax=72&srid=EPSG_4326', timeout=150))
+                break
+            except Exception:
+                if k == 2:
+                    raise
+                import time; time.sleep(20)
+    return _GAUGES
+def nehir_rekor():
+    """MAJOR taşkındaki noktalar arasında gözlem/tahmin tarihî rekoru aşıyorsa."""
+    d = gauges()
+    for g in d.get('gauges', d):
+        st = g.get('status', {}); o = st.get('observed', {}); f = st.get('forecast', {})
+        if 'major' not in (o.get('floodCategory'), f.get('floodCategory')):
+            continue
+        try:
+            gd = json.loads(get('https://api.water.noaa.gov/nwps/v1/gauges/' + g['lid']))
+            rek = max((c.get('stage') or 0) for c in gd['flood']['crests']['historic'])
+        except Exception:
+            continue
+        ob, fc = o.get('primary') or 0, f.get('primary') or 0
+        if rek and max(ob, fc) > rek:
+            ne = 'REKOR KIRDI' if ob > rek else 'rekor kırması bekleniyor'
+            yield (18 if ob > rek else 14), f"rekor:{g['lid']}:{ob > rek}", f"🏆 NEHİR {ne}: {g['name']}, {g['state']['abbreviation']}", \
+                f"şimdi {ob} ft, tahmin {fc} ft, eski rekor {rek} ft", 'https://water.noaa.gov/gauges/' + g['lid']
+def wpc_yuksek():
+    t = get('https://www.wpc.ncep.noaa.gov/discussions/hpcdiscussions.php?disc=qpferd').decode('utf-8', 'ignore')
+    t = re.sub(r'<[^>]+>', ' ', t)
+    for m in re.finditer(r'THERE IS A HIGH RISK OF EXCESSIVE RAINFALL[^.]*\.\.\.', t):
+        yield 16, f"wpc:{DAY}:{m.group(0)[:60]}", '🟥 WPC 4/4 YÜKSEK RİSK (ani sel)', ' '.join(m.group(0).split())[:180], 'https://www.wpc.ncep.noaa.gov/qpf/excessive_rainfall_outlook_ero.php'
 
 def gonder(mesaj):
     if os.environ.get('TG_BOT_TOKEN'):  # bulut (GitHub Actions secrets)
@@ -304,16 +395,27 @@ def main():
     ilk = not gor
     yeni, hatalar = [], []
     na = []
-    for kaynak in (nws, nwps, trends, dunya, rakip, avrupa, na_haber, na_deprem, na_rakip, na_youtube):
+    for kaynak in (yagis_rekor, saha_hasar, nehir_rekor, wpc_yuksek, nws, nwps, trends, dunya, rakip, avrupa, na_haber, na_deprem, na_rakip, na_youtube):
         try:
             for puan, key, baslik, detay, url in (kaynak() or []):
                 if key not in gor:
                     gor[key] = DAY; (na if key.startswith('na:') else yeni).append((puan, baslik, detay, url))
         except Exception as e:
             hatalar.append(f'{kaynak.__name__}: {e}')
+    # günün adayları (günde en az 2 video hedefi): puan>=13 olanlar biriktirilir
+    gun = gor.setdefault('_aday_' + DAY, [])
+    for puan, b, dt, u in yeni:
+        if puan >= 13 and b not in [x[1] for x in gun]:
+            gun.append([puan, b, u])
     # 3 günden eski kayıtları temizle
     sinir = (NOW - timedelta(days=3)).strftime('%Y-%m-%d')
-    gor = {k: v for k, v in gor.items() if k.startswith('_') or v >= sinir}
+    def tut(k, v):
+        if k.startswith('_aday_'):
+            return k[6:] >= sinir
+        if k.startswith('_ozet_'):
+            return k[6:16] >= sinir
+        return k.startswith('_') or v >= sinir
+    gor = {k: v for k, v in gor.items() if tut(k, v)}
     yeni.sort(key=lambda x: -x[0])
     zaman = datetime.now(TR).strftime('%d.%m %H:%M')
     if yeni:
@@ -342,6 +444,22 @@ def main():
         print(nabiz)
         if not DRY:
             gonder(nabiz)
+    # GÜNÜN KONULARI: TR 09:00 ve 17:00 sonrası ilk tarama, en iyi 3 aday (günde en az 2 video)
+    h = datetime.now(TR).hour
+    eksik = [d for d in (9, 17) if h >= d and f'_ozet_{DAY}_{d}' not in gor]
+    for d in eksik:
+        gor[f'_ozet_{DAY}_{d}'] = DAY
+    for dilim in eksik[-1:]:
+        if True:
+            ad = sorted(gor.get('_aday_' + DAY, []) + gor.get('_aday_' + (NOW - timedelta(days=1)).strftime('%Y-%m-%d'), []), key=lambda x: -x[0])[:3]
+            if ad:
+                m = f'🎬 <b>GÜNÜN KONULARI</b> {zaman} — hedef en az 2 video\n' + '\n'.join(
+                    f'{i}. <a href="{html.escape(u)}">{html.escape(b)}</a>' for i, (p, b, u) in enumerate(ad, 1))
+            else:
+                m = f'🎬 <b>GÜNÜN KONULARI</b> {zaman}: ölçülmüş büyük olay yok. Seri devamı veya GWN tutanına bak.'
+            print(m)
+            if not DRY:
+                gonder(m)
     if hatalar:
         print('HATA:', hatalar)
     if not DRY:
